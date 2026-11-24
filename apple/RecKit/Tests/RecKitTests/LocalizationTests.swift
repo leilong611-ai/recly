@@ -45,7 +45,7 @@ final class LocalizationCatalogTests: XCTestCase {
         let catalogs = try Self.files(named: [
             "Localizable.xcstrings", "InfoPlist.xcstrings", "AppShortcuts.xcstrings",
         ])
-        let found = catalogs.map { $0.path.replacingOccurrences(of: Self.appleRoot.path + "/", with: "") }
+        let found = catalogs.map(\.relativePath)
         XCTAssertEqual(found.sorted(), Self.expectedCatalogs.sorted())
         for catalog in catalogs {
             let json = try JSONSerialization.jsonObject(with: Data(contentsOf: catalog))
@@ -289,7 +289,7 @@ final class LocalizationCatalogTests: XCTestCase {
     private static func walk(_ include: (URL) -> Bool) throws -> [URL] {
         let manager = FileManager.default
         let enumerator = try XCTUnwrap(
-            manager.enumerator(at: appleRoot, includingPropertiesForKeys: [.isDirectoryKey])
+            manager.enumerator(at: appleRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.producesRelativePathURLs])
         )
         var found: [URL] = []
         for case let url as URL in enumerator {
