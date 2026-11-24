@@ -32,7 +32,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path)
     parser.add_argument("--bundle", required=True, help="Your own lowercase reverse-DNS app identifier")
+    parser.add_argument("--build-number", type=int, default=51, help="Positive Apple bundle build number")
     args = parser.parse_args()
+    if args.build_number < 1:
+        parser.error("Build number must be positive")
     base = args.bundle
     if not re.fullmatch(r"[a-z][a-z0-9]*(\.[a-z][a-z0-9-]*){2,}", base) or base.startswith("app.recly"):
         parser.error("Use a separate reverse-DNS identifier with at least three components")
@@ -52,8 +55,11 @@ def main():
         if path.name == "InfoPlist.xcstrings":
             new = new.replace("Recly", "Field Loom")
         if path.suffix == ".pbxproj":
+            new = re.sub(r"CURRENT_PROJECT_VERSION = [0-9]+;", f"CURRENT_PROJECT_VERSION = {args.build_number};", new)
             new = new.replace("CFBundleDisplayName = Recly;", 'CFBundleDisplayName = "Field Loom";')
             new = new.replace('"Import to Recly"', '"Import to Field Loom"')
+        if path.name == "Info.plist" and path.parent.name in {"RecPhone", "RecWatch", "RecMac"}:
+            new = new.replace("<dict>", f"<dict>\n\t<key>FieldLoomSourceCommit</key>\n\t<string>{commit}</string>", 1)
         if path.name == "Info.plist":
             new = new.replace("<string>Recly</string>", "<string>Field Loom</string>")
         if path.name == "DesktopUpdater.swift":

@@ -70,6 +70,7 @@ class TranscriptEditTest {
             watching.cancel()
             seen.close()
         }
+        f.core.awaitPushes()
         val (text, marks) = driveText(TranscribeRunner.textFileName(base))
         assertEquals("[00:00:00] S1: Hello there.\n[00:00:01] Minsu: hello 2\n", text)
         assertEquals("edited", marks["reclyTranscript"])

@@ -1,6 +1,7 @@
 #if os(iOS) || os(macOS)
 import CryptoKit
 import Foundation
+import os
 import ReclyCore
 
 /// docs/03 "Storage location" (ADR-024): the app's iCloud Drive folder — `Documents` of the container
@@ -203,8 +204,13 @@ public final class ICloudContainer: NSObject, ReclyCore.UbiquityContainer, @unch
 
     /// Blocking file work — coordination, downloads — away from the main thread and from Swift's own
     /// cooperative pool, which must not be held up by a coordinated read waiting on the network.
-    private func work<T>(_ body: @escaping () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
+    private static let trace = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "app.recly", category: "iCloudSync")
+
+    private func work<T>(_ body: @escaping () throws -> T, operation: StaticString = #function) async throws -> T {
+        let interval = OSSignpostID(log: Self.trace)
+        os_signpost(.begin, log: Self.trace, name: operation, signpostID: interval)
+        defer { os_signpost(.end, log: Self.trace, name: operation, signpostID: interval) }
+        return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 do { continuation.resume(returning: try body()) } catch { continuation.resume(throwing: error) }
             }

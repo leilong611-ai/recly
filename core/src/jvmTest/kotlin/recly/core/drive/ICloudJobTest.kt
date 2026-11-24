@@ -2,6 +2,19 @@
 
 package recly.core.drive
 
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeout
+import recly.core.recording.MetaWriter
+import recly.core.storage.CloudStorage
+import recly.core.storage.ICloudFiles
+import recly.core.storage.ICloudSettlementChecks
+import recly.core.storage.UbiquityContainer
+import recly.core.storage.UbiquityFile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -61,6 +74,60 @@ class ICloudJobTest {
 
         assertEquals(JobStatus.DONE, assertNotNull(store.get(job.id)).status)
         assertEquals(setOf(h.recordingId), store.uploadedRecordings())
+    }
+
+    @Test
+    fun `one stuck preflight lets the next job finish and both resume without duplicate parts`() = runBlocking<Unit> {
+        val h = DriveHarness(partCount = 2, partBytes = DriveHarness.SMALL_BYTES, icloud = true)
+        h.register()
+        val original = assertNotNull(h.recordings.get(h.recordingId)).meta
+        val second = original.copy(recordingId = "01J9SHORT00123456789ABCDEF", parts = emptyList())
+        val base = MetaWriter.baseName(second)
+        val dir = assertNotNull(h.dir.parent) / base
+        h.fs.createDirectories(dir)
+        val part = original.parts.first()
+        val shortPart = part.copy(file = MetaWriter.partFileName(base, 1, part.track))
+        h.fs.copy(h.dir / part.file, dir / shortPart.file)
+        val short = second.copy(parts = listOf(shortPart), durationSec = shortPart.durationSec)
+        MetaWriter.write(h.fs, dir, short)
+        h.recordings.create(short, dir)
+
+        val store = JobStore(h.db, h.deps)
+        val flow = testWorkflow(steps = listOf(Step.DriveUpload(id = "up", store = StorageKind.ICLOUD)))
+        val firstJob = assertNotNull(store.enqueue(h.recordingId, flow, START))
+        val nextJob = assertNotNull(store.enqueue(short.recordingId, flow, START + 1.seconds))
+        fun executor(runner: DriveUploadRunner) =
+            Executor(h.deps, store, h.recordings, mapOf(DriveUploadRunner.TYPE to runner))
+        executor(h.runner).runDueJobs(START + 2.seconds)
+        val container = assertNotNull(h.container)
+        container.settle()
+        val versions = container.entries.mapValues { it.value.modifiedAt }
+        val entered = CompletableDeferred<Continuation<Unit>>()
+        val hanging = object : UbiquityContainer by container {
+            override suspend fun file(path: String): UbiquityFile? {
+                if (path.endsWith("/${part.file}")) {
+                    suspendCoroutine<Unit> { check(entered.complete(it)) }
+                }
+                return container.file(path)
+            }
+        }
+        val files = ICloudFiles(hanging, h.deps, ICloudSettlementChecks(h.deps.io, 250.milliseconds))
+        val storage = CloudStorage(h.api, files, null)
+        val runner = DriveUploadRunner(storage, FolderResolver(storage, h.store, h.deps), h.store, h.recordings, h.deps)
+        val pass = async { executor(runner).runDueJobs(START + 60.seconds) }
+        val blocked = withTimeout(5.seconds) { entered.await() }
+        try {
+            withTimeout(5.seconds) { pass.await() }
+            assertEquals(JobStatus.WAITING, store.get(firstJob.id)?.status)
+            assertEquals(JobStatus.DONE, store.get(nextJob.id)?.status)
+        } finally {
+            blocked.resume(Unit)
+        }
+
+        // Recreate the executor over the persisted step states with the native service healthy.
+        executor(h.runner).runDueJobs(START + 600.seconds)
+        assertEquals(JobStatus.DONE, store.get(firstJob.id)?.status)
+        assertEquals(versions, container.entries.mapValues { it.value.modifiedAt })
     }
 
     /**
