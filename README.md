@@ -1,3 +1,7 @@
+# Independent Apple mobile sync fork
+
+[Maintenance, build, signing and device acceptance](docs/mobile-sync.md). This is an independent source project based on Recly.
+
 <div align="center">
 
 <img src="docs/design/icon.svg" width="120" alt="Recly icon">

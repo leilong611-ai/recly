@@ -87,7 +87,7 @@ class ICloudFiles internal constructor(
         ready()
         val path = join(pathOf(parentId), segment(name))
         if (mimeType == DriveApi.FOLDER_MIME) {
-            return if (container.isDirectory(path)) listOf(DriveFile(idOf(path), name, null, null)) else emptyList()
+            return if (lookup("directory:$path") { container.isDirectory(path) }) listOf(DriveFile(idOf(path), name, null, null)) else emptyList()
         }
         val file = fileAt(path) ?: return emptyList()
         return listOf(DriveFile(idOf(path), name, md5Of(file), null, file.size))
@@ -121,7 +121,7 @@ class ICloudFiles internal constructor(
     override suspend fun getFile(id: String, fields: String): JsonObject? {
         ready()
         val path = pathOf(id)
-        if (container.isDirectory(path)) {
+        if (lookup("directory:$path") { container.isDirectory(path) }) {
             return buildJsonObject {
                 put("id", id)
                 put("name", nameOf(path))
@@ -215,7 +215,7 @@ class ICloudFiles internal constructor(
             val path = pathOf(id)
             val uploaded = settlementChecks.check(folder) {
                 // A missing file has to be copied again; a slow check is only a wait.
-                val file = fileAt(path) ?: throw DriveNotFound("icloud: '$path' is gone")
+                val file = listed { container.file(path) } ?: throw DriveNotFound("icloud: '$path' is gone")
                 if (file.uploadFailure == UbiquityFile.QUOTA) {
                     throw StepFailure(
                         retryable = false,
@@ -250,7 +250,14 @@ class ICloudFiles internal constructor(
 
     private suspend fun forget() = mutex.withLock { listing = null }
 
-    private suspend fun fileAt(path: String): UbiquityFile? = listed { container.file(path) }
+    private suspend fun fileAt(path: String): UbiquityFile? =
+        lookup("file:$path") { listed { container.file(path) } }
+
+    private suspend fun <T> lookup(key: String, inspect: suspend () -> T): T = try {
+        settlementChecks.read(key, inspect)
+    } catch (_: ICloudSettlementChecks.ReadPending) {
+        throw StorageUnavailableException(StorageKind.ICLOUD, "iCloud file check is pending")
+    }
 
     /**
      * A container that cannot say what it holds — its listing of iCloud is not complete yet, or
@@ -286,7 +293,7 @@ class ICloudFiles internal constructor(
     /** md5 of a file's content, read once per version: a waiting upload step asks for it every pass. */
     private suspend fun md5Of(file: UbiquityFile): String? {
         mutex.withLock { digests[file.path]?.takeIf { it.matches(file) }?.let { return it.value } }
-        val md5 = container.md5(file.path) ?: return null
+        val md5 = lookup("digest:${file.path}") { container.md5(file.path) } ?: return null
         mutex.withLock { digests[file.path] = Cached(file.size, file.modifiedAt, md5) }
         return md5
     }

@@ -71,6 +71,49 @@ class ICloudFilesTest {
         }
     }
 
+    @Test
+    fun `slow preflight is a retry and another file remains discoverable`() = runBlocking<Unit> {
+        val parent = "recly/memo/test"
+        val name = "long.m4a"
+        val path = "$parent/$name"
+        container.arrive(path, ByteArray(128))
+        container.arrive("$parent/short.m4a", ByteArray(10))
+        val entered = CompletableDeferred<Continuation<Unit>>()
+        var shouldBlock = true
+        val native = object : UbiquityContainer by container {
+            override suspend fun file(path: String): UbiquityFile? {
+                if (path == "$parent/$name" && shouldBlock) {
+                    suspendCoroutine<Unit> { check(entered.complete(it)) }
+                }
+                return container.file(path)
+            }
+        }
+        val limited = ICloudFiles(native, deps, ICloudSettlementChecks(deps.io, 250.milliseconds))
+        suspend fun find(name: String) = limited.findChildren("icloud:$parent", name, null)
+        val first = async { assertFailsWith<StorageUnavailableException> { find(name) } }
+        val blocked = withTimeout(5.seconds) { entered.await() }
+        try {
+            withTimeout(5.seconds) { first.await() }
+            assertFailsWith<StorageUnavailableException> { find(name) }
+            assertEquals(10L, find("short.m4a").single().size)
+            assertTrue(find("missing").isEmpty())
+        } finally {
+            shouldBlock = false
+            blocked.resume(Unit)
+        }
+        withTimeout(5.seconds) {
+            while (true) {
+                try {
+                    assertEquals(128L, find(name).single().size)
+                    break
+                } catch (_: StorageUnavailableException) {
+                    kotlinx.coroutines.delay(10)
+                }
+            }
+        }
+        assertEquals(2, container.entries.size)
+    }
+
     private val base = "20260826T010000Z_desktop_01J9ABCD"
     private val folder = "recly/memo/2026-08/$base"
 

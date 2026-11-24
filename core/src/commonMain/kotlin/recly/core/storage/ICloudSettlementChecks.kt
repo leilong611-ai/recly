@@ -20,26 +20,35 @@ internal class ICloudSettlementChecks(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val lock = Mutex()
-    private val running = mutableMapOf<String, Deferred<Boolean>>()
+    private val running = mutableMapOf<String, Deferred<*>>()
 
-    suspend fun check(folder: String, inspect: suspend () -> Boolean): Boolean {
+    suspend fun check(folder: String, inspect: suspend () -> Boolean): Boolean =
+        try {
+            read("settlement:$folder", inspect)
+        } catch (_: ReadPending) {
+            false
+        }
+
+    internal class ReadPending : Exception()
+
+    suspend fun <T> read(key: String, inspect: suspend () -> T): T {
         val read = lock.withLock {
-            if (running[folder]?.isCompleted == false || running.size >= 8) return false
+            if (running[key]?.isCompleted == false || running.size >= 8) throw ReadPending()
             // This work is read-only. An unfinished read stays tracked until the native call
             // returns, so a later poll cannot pile up more reads for the same recording.
             val next = scope.async(start = CoroutineStart.LAZY) { inspect() }
-            running[folder] = next
+            running[key] = next
             next.invokeOnCompletion {
                 scope.launch {
                     lock.withLock {
-                        if (running[folder] === next) running.remove(folder)
+                        if (running[key] === next) running.remove(key)
                     }
                 }
             }
             next
         }
         return try {
-            withTimeoutOrNull(budget) { read.await() } ?: false
+            (withTimeoutOrNull(budget) { Result.success(read.await()) } ?: throw ReadPending()).getOrThrow()
         } finally {
             read.cancel()
         }
