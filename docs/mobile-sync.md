@@ -4,7 +4,7 @@ This independent source fork is based on Recly. The maintenance branch is `mobil
 
 ## Build and sign
 
-Use JDK 21, Xcode with the iOS and watchOS SDKs and the pinned Gradle wrapper. Use `make core-test` and `make ios-release-test`. See [development](development.md) for Apple frameworks, RecKit tests, provisioning and archives. Limit Gradle to one worker on a small Mac. `make core CORE_GRADLE_ARGS="--max-workers=1"` builds all release slices. The Mac and simulator refresh commands assume a previously staged XCFramework.
+Use JDK 21, Xcode with the iOS and watchOS SDKs and the pinned Gradle wrapper. Use `make core-test` and `make ios-release-test`. See [development](development.md) for Apple frameworks, RecKit tests, provisioning and archives. For a fresh device checkout use `make core-device`. This links the iPhone and both watch device architectures with one Gradle worker. Include the macOS test slice with `INCLUDE_MAC=1 make core-device`. This replaces only generated framework slices in the checkout. `make core CORE_GRADLE_ARGS="--max-workers=1"` builds all release slices. The Mac and simulator refresh commands assume a previously staged XCFramework.
 
 For an **in-place update**, use a build offered by the original publisher for the same App Store record. Verify that the publisher identifies the fix commit. Check the bundle identifier, signed application identifier, application groups and iCloud container against the installed original. Record the version and build on the phone after installation. A GitHub store-submission archive does not establish device installability.
 

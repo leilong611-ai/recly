@@ -20,7 +20,7 @@ WATCH_SIM ?= Apple Watch Series 11 (46mm)
 CORE_GRADLE_ARGS ?=
 SIM_BUILD_ARGS ?=
 
-.PHONY: help test core core-mac core-sim core-test android-test windows-test apk wear-apk aab android-release-apk windows-run windows-msi helper-test ios-archive ios-upload mac-release \
+.PHONY: help test core core-device core-mac core-sim core-test android-test windows-test apk wear-apk aab android-release-apk windows-run windows-msi helper-test ios-archive ios-upload mac-release \
         mac mac-test ios watch spec skills ios-release-test events events-test events-release
 
 help:
@@ -111,6 +111,9 @@ events-release:
 
 core:
 	./apple/scripts/build-core.sh $(CORE_GRADLE_ARGS)
+
+core-device:
+	./apple/scripts/build-device-core.sh $(CORE_GRADLE_ARGS)
 
 core-mac:
 	CORE_SLICES=macos ./apple/scripts/build-core.sh $(CORE_GRADLE_ARGS)
